@@ -672,9 +672,14 @@ async function generateExcel() {
         }});
         // 宿直翌日（休憩 0:00〜1:00 のため 1:00 スタート）
         entries.push({ day: nextDay, fn: row => {
-          const endH = rec.nextDayWork ? 5 : 8;
-          const endM = rec.nextDayWork ? 0 : 30;
-          setDeepNight(row, 1, 0, endH, endM); // 1:00〜5:00 or 1:00〜8:30
+          if (rec.nextDayWork) {
+            // 翌日勤務あり：深夜 1:00〜5:00 のみ
+            setDeepNight(row, 1, 0, 5, 0);
+          } else {
+            // 翌日休み：深夜 1:00〜5:00 ＋ 通常 5:00〜8:30
+            setDeepNight(row, 1, 0, 5, 0);
+            setRegular(row, 5, 0, 8, 30);
+          }
           set(`N${row}`, '宿直');
         }});
 
