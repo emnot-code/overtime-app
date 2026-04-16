@@ -568,6 +568,97 @@ function closeModal() {
 }
 
 // ===== HISTORY TAB =====
+// ===== EXCEL OUTPUT =====
+async function generateExcel() {
+  if (!window.XLSX) { showToast('ライブラリ読み込み中…少し待ってから再度お試しください'); return; }
+
+  const y = S.listMonth.getFullYear();
+  const m = S.listMonth.getMonth() + 1;
+
+  let arrayBuffer;
+  try {
+    const res = await fetch('./template.xlsx');
+    if (!res.ok) throw new Error();
+    arrayBuffer = await res.arrayBuffer();
+  } catch {
+    showToast('テンプレート読み込みエラー');
+    return;
+  }
+
+  const wb   = XLSX.read(arrayBuffer, { type: 'array', cellStyles: true });
+  const ws   = wb.Sheets['様式'];
+
+  const set = (addr, v) => {
+    if (!ws[addr]) ws[addr] = {};
+    ws[addr].t = typeof v === 'number' ? 'n' : 's';
+    ws[addr].v = v;
+    delete ws[addr].w; // clear cached formatted text
+  };
+
+  // ヘッダー：令和年・月
+  set('M4', y - 2018);
+  set('P4', m);
+
+  // 月のレコードを日付でグループ化
+  const monthRecs = getRecords().filter(r => {
+    const d = new Date(r.date + 'T00:00:00');
+    return d.getFullYear() === y && d.getMonth() === m - 1;
+  });
+  const byDay = {};
+  monthRecs.forEach(r => {
+    const day = parseInt(r.date.split('-')[2], 10);
+    (byDay[day] = byDay[day] || []).push(r);
+  });
+
+  for (const [dayStr, recs] of Object.entries(byDay)) {
+    const day = parseInt(dayStr, 10);
+    const row = 12 + day; // day 1 → row 13
+    set(`A${row}`, day);
+
+    const contents = [];
+    let emergency = false;
+
+    for (const rec of recs) {
+      if (rec.type === TYPE.OVERTIME) {
+        const [sh, sm] = rec.startTime.split(':').map(Number);
+        const [eh, em] = rec.endTime.split(':').map(Number);
+        set(`B${row}`, sh); set(`C${row}`, sm);
+        set(`D${row}`, eh); set(`E${row}`, em);
+        const label = rec.reason === 'その他' && rec.reasonDetail
+          ? rec.reasonDetail : (rec.reason || '');
+        if (label) contents.push(label);
+        if (rec.emergency) emergency = true;
+
+      } else if (rec.type === TYPE.SHUKUCHOKU) {
+        if (rec.nextDayWork) {
+          // 翌日勤務あり：22:00〜翌5:00（深夜のみ）
+          set(`H${row}`, 22); set(`I${row}`, 0);
+          set(`J${row}`, 5);  set(`K${row}`, 0);
+        } else {
+          // 翌日休み：17:30〜22:00（通常）＋ 22:00〜翌8:30（深夜）
+          set(`B${row}`, 17); set(`C${row}`, 30);
+          set(`D${row}`, 22); set(`E${row}`, 0);
+          set(`H${row}`, 22); set(`I${row}`, 0);
+          set(`J${row}`, 8);  set(`K${row}`, 30);
+        }
+        contents.push('宿直');
+
+      } else if (rec.type === TYPE.NITCHOKU) {
+        // 8:30〜17:15
+        set(`B${row}`, 8);  set(`C${row}`, 30);
+        set(`D${row}`, 17); set(`E${row}`, 15);
+        contents.push('日直');
+      }
+    }
+
+    if (contents.length) set(`N${row}`, contents.join('・'));
+    if (emergency)        set(`T${row}`, '○');
+  }
+
+  XLSX.writeFile(wb, `時間外報告書_${y}年${m}月.xlsx`);
+  showToast('Excel を出力しました');
+}
+
 function checkForUpdate() {
   if (confirm('キャッシュをクリアして最新版を読み込みます。よろしいですか？')) {
     (async () => {
@@ -634,10 +725,10 @@ function renderHistory() {
         </div>
       `).join('')}
       <div class="export-area">
-        <button class="btn btn-primary btn-sm" disabled style="opacity:.4;cursor:default;width:100%">
-          Excel出力（準備中）
+        <button class="btn btn-primary btn-sm" id="btn-excel" style="width:100%">
+          時間外報告書を出力（Excel）
         </button>
-        <div class="export-note">申請書テンプレート共有後に対応予定</div>
+        <div class="export-note">${y}年${m+1}月分の申請書を作成します</div>
         <button class="btn-update-check" id="btn-update">アップデートを確認</button>
       </div>
     </div>
@@ -656,6 +747,7 @@ function bindHistory() {
   });
   scr.addEventListener('click', e => {
     if (e.target.closest('#btn-update')) { checkForUpdate(); return; }
+    if (e.target.closest('#btn-excel'))  { generateExcel();  return; }
     const del = e.target.closest('.btn-delete-rec');
     if (del && confirm('この記録を削除しますか？')) { removeRecord(del.dataset.id); renderScreen(); }
   });

@@ -1,10 +1,11 @@
-const CACHE_NAME = 'overtime-app-v6';
+const CACHE_NAME = 'overtime-app-v7';
 const FILES_TO_CACHE = [
   './',
   './index.html',
   './style.css',
   './app.js',
   './manifest.json',
+  './template.xlsx',
 ];
 
 self.addEventListener('install', (e) => {
