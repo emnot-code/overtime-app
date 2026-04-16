@@ -1,0 +1,12 @@
+{
+  "name": "時間外記録",
+  "short_name": "時間外記録",
+  "description": "時間外労働の日々の記録と月次申請書出力",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#F2F2F7",
+  "theme_color": "#007AFF",
+  "orientation": "portrait",
+  "lang": "ja",
+  "icons": []
+}
