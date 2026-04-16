@@ -166,8 +166,8 @@ function renderOvertimePanel() {
       <button class="btn btn-danger btn-large" id="btn-evening">残業終了</button>
       <p class="hint-text">定時（17:15）からの残業を記録</p>
       <div class="divider"></div>
-      <button class="btn btn-holiday" id="btn-holiday">休日出勤を記録</button>
-      <p class="hint-text">土日・祝日の出勤を記録</p>
+      <button class="btn btn-holiday" id="btn-holiday">任意の時間で記録</button>
+      <p class="hint-text">開始〜終了の全時間が時間外として計算されます</p>
       <div class="divider"></div>
       <button class="btn btn-morning" id="btn-morning">早出残業を記録</button>
       <p class="hint-text">定時前（〜8:30）の残業を記録</p>
@@ -276,7 +276,7 @@ function renderTodayRecords(today) {
 
 function recordItemHTML(r) {
   if (r.type === TYPE.OVERTIME) {
-    const label  = r.overtimeKind === 'morning' ? '早出' : r.overtimeKind === 'holiday' ? '休日出勤' : '残業';
+    const label  = r.overtimeKind === 'morning' ? '早出' : r.overtimeKind === 'holiday' ? '時間外' : '残業';
     const badge  = `<span class="badge badge-overtime">${label}</span>`;
     const emBadge = r.emergency ? `<span class="badge badge-emergency">🚨 緊急呼出</span>` : '';
     const reason = r.reason === 'その他' && r.reasonDetail ? r.reasonDetail : (r.reason || '');
@@ -467,7 +467,7 @@ function showOvertimeModal(kind) {
   overlay.innerHTML = `
     <div class="modal">
       <div class="modal-handle"></div>
-      <div class="modal-title">${kind === 'evening' ? '残業終了' : kind === 'holiday' ? '休日出勤' : '早出残業'}</div>
+      <div class="modal-title">${kind === 'evening' ? '残業終了' : kind === 'holiday' ? '任意の時間で記録' : '早出残業'}</div>
       <div class="modal-body">
         <div class="form-group">
           <label class="form-label">日付</label>
