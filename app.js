@@ -568,6 +568,18 @@ function closeModal() {
 }
 
 // ===== HISTORY TAB =====
+function checkForUpdate() {
+  if (confirm('キャッシュをクリアして最新版を読み込みます。よろしいですか？')) {
+    (async () => {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      for (const r of regs) await r.unregister();
+      const keys = await caches.keys();
+      for (const k of keys) await caches.delete(k);
+      location.reload(true);
+    })();
+  }
+}
+
 function renderHistory() {
   const y = S.listMonth.getFullYear();
   const m = S.listMonth.getMonth();
@@ -626,6 +638,7 @@ function renderHistory() {
           Excel出力（準備中）
         </button>
         <div class="export-note">申請書テンプレート共有後に対応予定</div>
+        <button class="btn-update-check" id="btn-update">アップデートを確認</button>
       </div>
     </div>
   `;
@@ -642,6 +655,7 @@ function bindHistory() {
     renderScreen();
   });
   scr.addEventListener('click', e => {
+    if (e.target.closest('#btn-update')) { checkForUpdate(); return; }
     const del = e.target.closest('.btn-delete-rec');
     if (del && confirm('この記録を削除しますか？')) { removeRecord(del.dataset.id); renderScreen(); }
   });

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'overtime-app-v5';
+const CACHE_NAME = 'overtime-app-v6';
 const FILES_TO_CACHE = [
   './',
   './index.html',

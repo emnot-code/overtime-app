@@ -728,6 +728,22 @@ body {
   margin-top: 8px;
 }
 
+.btn-update-check {
+  margin-top: 16px;
+  width: 100%;
+  padding: 10px;
+  background: none;
+  border: none;
+  font-size: 13px;
+  color: #8E8E93;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.btn-update-check:active {
+  color: #3C3C43;
+}
+
 /* ===== Schedule Tab ===== */
 .add-schedule-card {
   background: white;
