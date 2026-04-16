@@ -1,7 +1,7 @@
 'use strict';
 
 // ===== CONSTANTS =====
-const STORAGE = { RECORDS: 'ot_records_v1' };
+const STORAGE = { RECORDS: 'ot_records_v1', SETTINGS: 'ot_settings_v1' };
 
 const TYPE = {
   OVERTIME:   'overtime',
@@ -31,7 +31,9 @@ const S = {
 // ===== STORAGE =====
 const load = (key, def) => { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : def; } catch { return def; } };
 const store = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} };
-const getRecords = () => load(STORAGE.RECORDS, []);
+const getRecords  = () => load(STORAGE.RECORDS,  []);
+const getSettings = () => load(STORAGE.SETTINGS, { name: '', department: '' });
+const saveSettings = s => store(STORAGE.SETTINGS, s);
 
 function upsertRecord(rec) {
   const recs = getRecords();
@@ -585,19 +587,22 @@ async function generateExcel() {
     return;
   }
 
-  const wb   = XLSX.read(arrayBuffer, { type: 'array', cellStyles: true });
-  const ws   = wb.Sheets['様式'];
+  const wb = XLSX.read(arrayBuffer, { type: 'array', cellStyles: true });
+  const ws = wb.Sheets['様式'];
 
   const set = (addr, v) => {
     if (!ws[addr]) ws[addr] = {};
     ws[addr].t = typeof v === 'number' ? 'n' : 's';
     ws[addr].v = v;
-    delete ws[addr].w; // clear cached formatted text
+    delete ws[addr].w;
   };
 
-  // ヘッダー：令和年・月
+  // ヘッダー：令和年・月・氏名・所属
   set('M4', y - 2018);
   set('P4', m);
+  const settings = getSettings();
+  if (settings.name)       set('K6', settings.name);
+  if (settings.department) set('X8', settings.department);
 
   // 月のレコードを日付でグループ化
   const monthRecs = getRecords().filter(r => {
@@ -615,36 +620,65 @@ async function generateExcel() {
     const row = 12 + day; // day 1 → row 13
     set(`A${row}`, day);
 
-    const contents = [];
-    let emergency = false;
+    const contents  = [];
+    let emRegular   = false;
+    let emDeepNight = false;
 
     for (const rec of recs) {
       if (rec.type === TYPE.OVERTIME) {
         const [sh, sm] = rec.startTime.split(':').map(Number);
         const [eh, em] = rec.endTime.split(':').map(Number);
-        set(`B${row}`, sh); set(`C${row}`, sm);
-        set(`D${row}`, eh); set(`E${row}`, em);
+        // 深夜帯（22:00〜5:00）か判定
+        const isDeepNight = sh >= 22 || sh < 5;
+        if (isDeepNight) {
+          set(`H${row}`, sh); set(`I${row}`, sm);
+          set(`J${row}`, eh); set(`K${row}`, em);
+          if (rec.emergency) emDeepNight = true;
+        } else {
+          set(`B${row}`, sh); set(`C${row}`, sm);
+          set(`D${row}`, eh); set(`E${row}`, em);
+          if (rec.emergency) emRegular = true;
+        }
         const label = rec.reason === 'その他' && rec.reasonDetail
           ? rec.reasonDetail : (rec.reason || '');
         if (label) contents.push(label);
-        if (rec.emergency) emergency = true;
 
       } else if (rec.type === TYPE.SHUKUCHOKU) {
+        // 宿直は日をまたぐため 2 行に分割して記入
+        const nextDay = day + 1;
+        const nextRow = 12 + nextDay;
+        const hasNextRow = nextDay <= 31;
+
         if (rec.nextDayWork) {
-          // 翌日勤務あり：22:00〜翌5:00（深夜のみ）
+          // 翌日勤務あり：当日 22:00-24:00 ／ 翌日 0:00-5:00
           set(`H${row}`, 22); set(`I${row}`, 0);
-          set(`J${row}`, 5);  set(`K${row}`, 0);
+          set(`J${row}`, 24); set(`K${row}`, 0);
+          set(`N${row}`, '宿直');
+          if (hasNextRow) {
+            set(`A${nextRow}`, nextDay);
+            set(`H${nextRow}`, 0); set(`I${nextRow}`, 0);
+            set(`J${nextRow}`, 5); set(`K${nextRow}`, 0);
+            set(`N${nextRow}`, '宿直');
+          }
         } else {
-          // 翌日休み：17:30〜22:00（通常）＋ 22:00〜翌8:30（深夜）
-          set(`B${row}`, 17); set(`C${row}`, 30);
+          // 翌日休み：当日 17:15-22:00（通常）+ 22:00-24:00（深夜）／ 翌日 0:00-8:30（深夜）
+          set(`B${row}`, 17); set(`C${row}`, 15);
           set(`D${row}`, 22); set(`E${row}`, 0);
           set(`H${row}`, 22); set(`I${row}`, 0);
-          set(`J${row}`, 8);  set(`K${row}`, 30);
+          set(`J${row}`, 24); set(`K${row}`, 0);
+          set(`N${row}`, '宿直');
+          if (hasNextRow) {
+            set(`A${nextRow}`, nextDay);
+            set(`H${nextRow}`, 0); set(`I${nextRow}`, 0);
+            set(`J${nextRow}`, 8); set(`K${nextRow}`, 30);
+            set(`N${nextRow}`, '宿直');
+          }
         }
-        contents.push('宿直');
+        // 宿直行は N を直接設定済みなので contents は使わない
+        continue;
 
       } else if (rec.type === TYPE.NITCHOKU) {
-        // 8:30〜17:15
+        // 日直：8:30〜17:15
         set(`B${row}`, 8);  set(`C${row}`, 30);
         set(`D${row}`, 17); set(`E${row}`, 15);
         contents.push('日直');
@@ -652,7 +686,8 @@ async function generateExcel() {
     }
 
     if (contents.length) set(`N${row}`, contents.join('・'));
-    if (emergency)        set(`T${row}`, '○');
+    if (emRegular)   set(`T${row}`, '○');
+    if (emDeepNight) set(`V${row}`, '○');
   }
 
   XLSX.writeFile(wb, `時間外報告書_${y}年${m}月.xlsx`);
@@ -725,11 +760,29 @@ function renderHistory() {
         </div>
       `).join('')}
       <div class="export-area">
+        ${renderSettingsFields()}
         <button class="btn btn-primary btn-sm" id="btn-excel" style="width:100%">
           時間外報告書を出力（Excel）
         </button>
         <div class="export-note">${y}年${m+1}月分の申請書を作成します</div>
         <button class="btn-update-check" id="btn-update">アップデートを確認</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderSettingsFields() {
+  const s = getSettings();
+  const esc = v => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  return `
+    <div class="settings-row">
+      <div class="settings-field">
+        <label class="form-label">氏名</label>
+        <input type="text" class="form-input" id="set-name" placeholder="研修医" value="${esc(s.name)}">
+      </div>
+      <div class="settings-field">
+        <label class="form-label">所属名</label>
+        <input type="text" class="form-input" id="set-dept" placeholder="臨床研修センター" value="${esc(s.department)}">
       </div>
     </div>
   `;
@@ -745,6 +798,16 @@ function bindHistory() {
     S.listMonth = new Date(S.listMonth.getFullYear(), S.listMonth.getMonth() + 1, 1);
     renderScreen();
   });
+  // 名前・所属の自動保存
+  ['set-name', 'set-dept'].forEach(id => {
+    document.getElementById(id)?.addEventListener('input', () => {
+      saveSettings({
+        name:       document.getElementById('set-name')?.value || '',
+        department: document.getElementById('set-dept')?.value || '',
+      });
+    });
+  });
+
   scr.addEventListener('click', e => {
     if (e.target.closest('#btn-update')) { checkForUpdate(); return; }
     if (e.target.closest('#btn-excel'))  { generateExcel();  return; }
