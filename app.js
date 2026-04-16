@@ -597,6 +597,29 @@ async function generateExcel() {
     delete ws[addr].w;
   };
 
+  // 時・分から計（時間・分）を計算
+  // Excelの計算式と同じロジック: 終分<始分なら1時間借り
+  const calcHM = (bh, bm, dh, dm) => ({
+    h: dm < bm ? dh - bh - 1 : dh - bh,
+    m: dm < bm ? dm - bm + 60 : dm - bm,
+  });
+
+  // 通常時間帯（B〜G列）に記入
+  const setRegular = (row, sh, sm, eh, em) => {
+    set(`B${row}`, sh); set(`C${row}`, sm);
+    set(`D${row}`, eh); set(`E${row}`, em);
+    const { h, m: min } = calcHM(sh, sm, eh, em);
+    set(`F${row}`, h);  set(`G${row}`, min);
+  };
+
+  // 深夜時間帯（H〜M列）に記入
+  const setDeepNight = (row, sh, sm, eh, em) => {
+    set(`H${row}`, sh); set(`I${row}`, sm);
+    set(`J${row}`, eh); set(`K${row}`, em);
+    const { h, m: min } = calcHM(sh, sm, eh, em);
+    set(`L${row}`, h);  set(`M${row}`, min);
+  };
+
   // ヘッダー：令和年・月・氏名・所属
   set('M4', y - 2018);
   set('P4', m);
@@ -604,7 +627,7 @@ async function generateExcel() {
   if (settings.name)       set('K6', settings.name);
   if (settings.department) set('X8', settings.department);
 
-  // 月のレコードを日付でグループ化
+  // 月のレコードを日付でグループ化（日付昇順）
   const monthRecs = getRecords().filter(r => {
     const d = new Date(r.date + 'T00:00:00');
     return d.getFullYear() === y && d.getMonth() === m - 1;
@@ -615,80 +638,82 @@ async function generateExcel() {
     (byDay[day] = byDay[day] || []).push(r);
   });
 
-  for (const [dayStr, recs] of Object.entries(byDay)) {
-    const day = parseInt(dayStr, 10);
-    const row = 12 + day; // day 1 → row 13
-    set(`A${row}`, day);
+  // 記入エントリを構築（1レコードが複数行になる場合あり）
+  // entry = { day, writeFn }
+  const entries = [];
 
-    const contents  = [];
-    let emRegular   = false;
-    let emDeepNight = false;
+  const sortedDays = Object.entries(byDay).sort((a, b) => +a[0] - +b[0]);
+
+  for (const [dayStr, recs] of sortedDays) {
+    const day = parseInt(dayStr, 10);
 
     for (const rec of recs) {
       if (rec.type === TYPE.OVERTIME) {
         const [sh, sm] = rec.startTime.split(':').map(Number);
         const [eh, em] = rec.endTime.split(':').map(Number);
-        // 深夜帯（22:00〜5:00）か判定
         const isDeepNight = sh >= 22 || sh < 5;
-        if (isDeepNight) {
-          set(`H${row}`, sh); set(`I${row}`, sm);
-          set(`J${row}`, eh); set(`K${row}`, em);
-          if (rec.emergency) emDeepNight = true;
-        } else {
-          set(`B${row}`, sh); set(`C${row}`, sm);
-          set(`D${row}`, eh); set(`E${row}`, em);
-          if (rec.emergency) emRegular = true;
-        }
         const label = rec.reason === 'その他' && rec.reasonDetail
           ? rec.reasonDetail : (rec.reason || '');
-        if (label) contents.push(label);
+        entries.push({ day, fn: row => {
+          if (isDeepNight) setDeepNight(row, sh, sm, eh, em);
+          else             setRegular(row, sh, sm, eh, em);
+          if (label)         set(`N${row}`, label);
+          if (rec.emergency) set(isDeepNight ? `V${row}` : `T${row}`, '○');
+        }});
 
       } else if (rec.type === TYPE.SHUKUCHOKU) {
-        // 宿直は日をまたぐため 2 行に分割して記入
         const nextDay = day + 1;
-        const nextRow = 12 + nextDay;
-        const hasNextRow = nextDay <= 31;
-
-        if (rec.nextDayWork) {
-          // 翌日勤務あり：当日 22:00-24:00 ／ 翌日 0:00-5:00
-          set(`H${row}`, 22); set(`I${row}`, 0);
-          set(`J${row}`, 24); set(`K${row}`, 0);
+        // 宿直当日（22:00〜24:00 深夜 ＋ 翌日休みは通常 17:15〜22:00 も）
+        entries.push({ day, fn: row => {
+          if (!rec.nextDayWork) setRegular(row, 17, 15, 22, 0); // 翌日休みのみ
+          setDeepNight(row, 22, 0, 24, 0);
           set(`N${row}`, '宿直');
-          if (hasNextRow) {
-            set(`A${nextRow}`, nextDay);
-            set(`H${nextRow}`, 0); set(`I${nextRow}`, 0);
-            set(`J${nextRow}`, 5); set(`K${nextRow}`, 0);
-            set(`N${nextRow}`, '宿直');
-          }
-        } else {
-          // 翌日休み：当日 17:15-22:00（通常）+ 22:00-24:00（深夜）／ 翌日 0:00-8:30（深夜）
-          set(`B${row}`, 17); set(`C${row}`, 15);
-          set(`D${row}`, 22); set(`E${row}`, 0);
-          set(`H${row}`, 22); set(`I${row}`, 0);
-          set(`J${row}`, 24); set(`K${row}`, 0);
+          // 宿直は緊急呼出欄への記入不要
+        }});
+        // 宿直翌日（休憩 0:00〜1:00 のため 1:00 スタート）
+        entries.push({ day: nextDay, fn: row => {
+          const endH = rec.nextDayWork ? 5 : 8;
+          const endM = rec.nextDayWork ? 0 : 30;
+          setDeepNight(row, 1, 0, endH, endM); // 1:00〜5:00 or 1:00〜8:30
           set(`N${row}`, '宿直');
-          if (hasNextRow) {
-            set(`A${nextRow}`, nextDay);
-            set(`H${nextRow}`, 0); set(`I${nextRow}`, 0);
-            set(`J${nextRow}`, 8); set(`K${nextRow}`, 30);
-            set(`N${nextRow}`, '宿直');
-          }
-        }
-        // 宿直行は N を直接設定済みなので contents は使わない
-        continue;
+        }});
 
       } else if (rec.type === TYPE.NITCHOKU) {
-        // 日直：8:30〜17:15
-        set(`B${row}`, 8);  set(`C${row}`, 30);
-        set(`D${row}`, 17); set(`E${row}`, 15);
-        contents.push('日直');
+        // 日直：休憩（12:00〜13:00）を挟んで2行
+        entries.push({ day, fn: row => {
+          setRegular(row, 8, 30, 12, 0); // 8:30〜12:00
+          set(`N${row}`, '日直');
+        }});
+        entries.push({ day, fn: row => {
+          setRegular(row, 13, 0, 17, 15); // 13:00〜17:15
+          set(`N${row}`, '日直');
+        }});
       }
     }
-
-    if (contents.length) set(`N${row}`, contents.join('・'));
-    if (emRegular)   set(`T${row}`, '○');
-    if (emDeepNight) set(`V${row}`, '○');
   }
+
+  // エントリを行 13〜43 に順番に書き込む
+  entries.forEach((entry, idx) => {
+    const row = 13 + idx;
+    if (row > 43) return;
+    set(`A${row}`, entry.day);
+    entry.fn(row);
+  });
+
+  // 計 行（44行目）を集計して直接書き込む
+  let sumRegH = 0, sumRegM = 0, sumDnH = 0, sumDnM = 0;
+  for (let r = 13; r <= 43; r++) {
+    sumRegH += ws[`F${r}`]?.v || 0;
+    sumRegM += ws[`G${r}`]?.v || 0;
+    sumDnH  += ws[`L${r}`]?.v || 0;
+    sumDnM  += ws[`M${r}`]?.v || 0;
+  }
+  // 分から時間への繰り上げ
+  sumRegH += Math.floor(sumRegM / 60); sumRegM = sumRegM % 60;
+  sumDnH  += Math.floor(sumDnM  / 60); sumDnM  = sumDnM  % 60;
+
+  if (sumRegH || sumRegM) { set('F44', sumRegH); set('G44', sumRegM); }
+  if (sumDnH  || sumDnM)  { set('L44', sumDnH);  set('M44', sumDnM);  }
 
   XLSX.writeFile(wb, `時間外報告書_${y}年${m}月.xlsx`);
   showToast('Excel を出力しました');
