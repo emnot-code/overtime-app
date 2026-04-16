@@ -908,6 +908,26 @@ body {
   margin-bottom: 8px;
 }
 
+.btn-holiday {
+  width: 100%;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1.5px solid #34C759;
+  font-size: 17px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  background: #F0FDF4;
+  color: #1A7A35;
+  text-align: center;
+  margin-bottom: 12px;
+  transition: opacity 0.15s;
+}
+
+.btn-holiday:active {
+  opacity: 0.7;
+}
+
 .btn-morning {
   width: 100%;
   padding: 14px;

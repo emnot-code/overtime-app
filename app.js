@@ -166,6 +166,9 @@ function renderOvertimePanel() {
       <button class="btn btn-danger btn-large" id="btn-evening">残業終了</button>
       <p class="hint-text">定時（17:15）からの残業を記録</p>
       <div class="divider"></div>
+      <button class="btn btn-holiday" id="btn-holiday">休日出勤を記録</button>
+      <p class="hint-text">土日・祝日の出勤を記録</p>
+      <div class="divider"></div>
       <button class="btn btn-morning" id="btn-morning">早出残業を記録</button>
       <p class="hint-text">定時前（〜8:30）の残業を記録</p>
     </div>
@@ -273,7 +276,7 @@ function renderTodayRecords(today) {
 
 function recordItemHTML(r) {
   if (r.type === TYPE.OVERTIME) {
-    const label  = r.overtimeKind === 'morning' ? '早出' : '残業';
+    const label  = r.overtimeKind === 'morning' ? '早出' : r.overtimeKind === 'holiday' ? '休日出勤' : '残業';
     const badge  = `<span class="badge badge-overtime">${label}</span>`;
     const emBadge = r.emergency ? `<span class="badge badge-emergency">🚨 緊急呼出</span>` : '';
     const reason = r.reason === 'その他' && r.reasonDetail ? r.reasonDetail : (r.reason || '');
@@ -339,6 +342,7 @@ function bindRecord() {
 
     // Overtime buttons
     if (e.target.closest('#btn-evening')) { showOvertimeModal('evening'); return; }
+    if (e.target.closest('#btn-holiday')) { showOvertimeModal('holiday'); return; }
     if (e.target.closest('#btn-morning')) { showOvertimeModal('morning'); return; }
 
     // Next-day toggle (宿直)
@@ -452,15 +456,18 @@ function saveNitchoku() {
 
 // ===== OVERTIME MODAL =====
 function showOvertimeModal(kind) {
-  const defaultStart = kind === 'evening' ? '17:15' : toTimeStr();
-  const defaultEnd   = kind === 'evening' ? toTimeStr() : '08:30';
+  const defaultStart = kind === 'evening' ? '17:15' : kind === 'holiday' ? '08:30' : toTimeStr();
+  const defaultEnd   = kind === 'evening' ? toTimeStr() : kind === 'holiday' ? '17:15' : '08:30';
+  const calcMin = (s, e) => kind === 'holiday'
+    ? Math.floor(calcActualMin(s, e) / 5) * 5
+    : calcOvertimeMin(s, e);
   const today        = toDateStr();
 
   const overlay = document.getElementById('modal-overlay');
   overlay.innerHTML = `
     <div class="modal">
       <div class="modal-handle"></div>
-      <div class="modal-title">${kind === 'evening' ? '残業終了' : '早出残業'}</div>
+      <div class="modal-title">${kind === 'evening' ? '残業終了' : kind === 'holiday' ? '休日出勤' : '早出残業'}</div>
       <div class="modal-body">
         <div class="form-group">
           <label class="form-label">日付</label>
@@ -479,7 +486,7 @@ function showOvertimeModal(kind) {
         </div>
         <div class="calculated-duration">
           <div class="calculated-duration-label">時間外</div>
-          <div class="calculated-duration-value" id="dur-val">${formatDuration(calcOvertimeMin(defaultStart, defaultEnd))}</div>
+          <div class="calculated-duration-value" id="dur-val">${formatDuration(calcMin(defaultStart, defaultEnd))}</div>
         </div>
         <div class="form-group">
           <label class="form-label">残業理由</label>
@@ -507,7 +514,7 @@ function showOvertimeModal(kind) {
   const recalc = () => {
     const s = document.getElementById('m-start')?.value;
     const e = document.getElementById('m-end')?.value;
-    if (s && e) document.getElementById('dur-val').textContent = formatDuration(calcOvertimeMin(s, e));
+    if (s && e) document.getElementById('dur-val').textContent = formatDuration(calcMin(s, e));
   };
   document.getElementById('m-start').addEventListener('change', recalc);
   document.getElementById('m-end').addEventListener('change', recalc);
@@ -541,7 +548,7 @@ function showOvertimeModal(kind) {
     upsertRecord({
       id: uid(), date: recDate, type: TYPE.OVERTIME, overtimeKind: kind,
       startTime: startStr, endTime: endStr,
-      durationMinutes: calcOvertimeMin(startStr, endStr),
+      durationMinutes: calcMin(startStr, endStr),
       reason: selectedReason,
       reasonDetail: document.getElementById('reason-detail')?.value.trim() || '',
       emergency,
